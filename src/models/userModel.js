@@ -24,14 +24,6 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: true,
       minlength: 8,
-      validate: {
-        validator: (v) =>
-          /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[!@#$%^&*])[A-Za-z\d!@#$%^&*]{8,}$/.test(
-            v
-          ),
-        message:
-          "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character",
-      },
     },
     role: {
       type: String,
@@ -50,20 +42,49 @@ const userSchema = new mongoose.Schema(
     verificationTokenExpires: Date,
     resetPasswordToken: String,
     resetPasswordExpires: Date,
+    otp: String,
+    otpExpires: Date,
     isDeleted: {
       type: Boolean,
       default: false,
     },
+    // New fields for service provider profile
+    skills: {
+      type: [String], // Array of skills
+      default: [],
+    },
+    experience: {
+      type: Number, // Experience in years
+      default: 0,
+    },
+    services: {
+      type: [String], // Array of services offered by the provider
+      default: [],
+    },
+    pricing: {
+      type: Number, // Pricing per hour or service
+      default: 0,
+    },
+    location: {
+      type: String, // Location of the service provider
+      default: "",
+    },
+    bio: {
+      type: String, // Short bio for the provider
+      default: "",
+    },
+    isProfileComplete: {
+      type: Boolean,
+      default: false, // Track if the profile is complete or not
+    },
+    gender: {
+      type: String,
+      enum: ["male", "female", "other"],
+      default: "other",
+    },
   },
   { timestamps: true }
 );
-
-// 🔒 Hash Password Before Saving
-userSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) return next();
-  this.password = await bcrypt.hash(this.password, 12);
-  next();
-});
 
 // 🔑 Compare Passwords
 userSchema.methods.comparePassword = async function (enteredPassword) {
