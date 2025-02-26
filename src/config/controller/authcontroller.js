@@ -358,3 +358,77 @@ export const buildProfile = async(req,res)=>{
 
   }
 }
+export const getAllserviceProvider = async (req, res) => {
+  try {
+    const providers = await User.find({ role: "service-provider" });
+
+    if (!providers || providers.length === 0) {
+      return res.status(404).json({ message: "No service providers found" });
+    }
+
+    // Map over providers and remove sensitive info
+    const providerDetails = providers.map(provider => {
+      return {
+        _id: provider._id,
+        name: provider.name,
+        profilePicture: provider.profilePicture,
+        bio: provider.bio,
+        experience: provider.experience,
+        gender: provider.gender,
+        isProfileComplete: provider.isProfileComplete,
+        location: provider.location,
+        pricing: provider.pricing,
+        services: provider.services,
+        skills: provider.skills
+      };
+    });
+
+    res.status(200).json({ providers: providerDetails });
+  } catch (error) {
+    console.error("Error fetching service providers:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+
+export const getProfile = async(req,res)=>{
+  try {
+    const user = await User.findById(req.user.id)
+
+    if (!user) {
+      res.status(404).json({message:"User not found"})
+    }
+    res.status(200).json({user})
+  } catch (error) {
+    console.error("Error fetching user profile:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+}
+
+
+export const updateProfile = async(req,res)=>{
+  try {
+    const {skills,experience,services,pricing,location,bio,gender}=req.body;
+let user = await User.findById(req.user.id) ; 
+if (!user) {
+  return res.status(404).json({ message: "User not found" });
+}
+  // Update the user profile with new information
+  user.skills = skills || user.skills;
+  user.experience = experience || user.experience;
+  user.services = services || user.services;
+  user.pricing = pricing || user.pricing;
+  user.location = location || user.location;
+  user.bio = bio || user.bio;
+  user.gender = gender || user.gender;
+
+  user.isProfileComplete = Boolean(services && pricing && location);
+  await user.save();
+  res.status(200).json({message: "Profile updated successfully", user })
+
+    }
+  catch (error) {
+    console.error("Profile Update Error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+}

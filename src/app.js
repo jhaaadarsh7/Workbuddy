@@ -11,14 +11,14 @@ dotenv.config({ path: "./.env" });
 
 const app = express();
 
-// ✅ Connect to MongoDB
+//  Connect to MongoDB
 connectMongo();
 
-// ✅ Middleware Setup
+//  Middleware Setup
 app.use(
   cors({
-    origin: "http://localhost:3000", // ⚠️ Change this if frontend is hosted elsewhere
-    credentials: true, // ✅ Required for cookies in Postman & frontend
+    origin: "http://localhost:3000", // Change this if frontend is hosted elsewhere
+    credentials: true, //  Required for cookies in Postman & frontend
   })
 );
 app.use(helmet());
