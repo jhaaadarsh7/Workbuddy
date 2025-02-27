@@ -432,3 +432,36 @@ if (!user) {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 }
+
+export const getAllusers = async (req, res) => {
+  try {
+    const users = await User.find();
+    res.status(200).json({ message: "All users found", users });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+export const deleteUsers = async (req, res) => {
+  try {
+    const user = await User.findByIdAndDelete(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    res.status(200).json({ message: "User deleted successfully" });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+export const updateRole = async (req, res) => {
+  const { role } = req.body;
+  try {
+    const user = await User.findByIdAndUpdate(req.params.id, { role }, { new: true }); // Ensure the updated user is returned
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    res.status(200).json({ message: "User role updated", user });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
