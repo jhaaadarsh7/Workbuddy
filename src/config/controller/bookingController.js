@@ -1,5 +1,7 @@
 import Booking from "../../models/BookingModel.js";
 import Service from "../../models/serviceModel.js";
+import User from "../../models/userModel.js";
+
 export const createBooking = async (req, res) => {
   try {
     const { serviceProvider, service, bookingDate, startTime, endTime, location } = req.body;
@@ -228,51 +230,170 @@ export const updateBooking = async(req,res)=>{
     }
   };
 
-  export const addFeedBack = async(req,res)=>{
-try {
-  const{feedback,rating} = req.body;
-  const bookingId = req.params.id;
-
-  if (rating<1 || rating>5) {
-    return res.status(400).json({
-      success:false,
-      message:"Rating must be between 1 and 5",    
-    });
-
-    const booking = await Booking.findOne({_id:bookingId,user:req.user.id,
-      status:"completed",
-    });
-    if (!booking) {
-      return res.status(404).json({
+  export const addFeedBack = async (req, res) => {
+    try {
+      const { feedback, rating } = req.body;
+      const bookingId = req.params.id;
+  
+      console.log("User ID:", req.user.id); // Debug: Check user ID
+      console.log("Booking ID:", bookingId); // Debug: Check booking ID
+  
+      // Validate rating first
+      if (rating < 1 || rating > 5) {
+        return res.status(400).json({
+          success: false,
+          message: "Rating must be between 1 and 5",
+        });
+      }
+  
+      // Find booking
+      const booking = await Booking.findOne({
+        _id: bookingId,
+        user: req.user.id,
+        status: "completed",
+      });
+  
+      if (!booking) {
+        return res.status(404).json({
+          success: false,
+          message: "Booking not found or not eligible for feedback",
+        });
+      }
+  
+      // Update booking feedback
+      booking.feedback = feedback;
+      booking.rating = rating;
+      const updatedBooking = await booking.save();
+  
+      // Update service provider's reviews
+      const provider = await User.findById(booking.serviceProvider);
+      
+      provider.reviews.push({
+        user: req.user.id,
+        feedback,
+        rating,
+      });
+  
+      // Calculate new average rating
+      const totalRatings = provider.reviews.reduce(
+        (acc, review) => acc + review.rating,
+        0
+      );
+      provider.averageRating = totalRatings / provider.reviews.length;
+      
+      await provider.save();
+  
+      res.status(200).json({
+        success: true,
+        message: "Feedback submitted successfully",
+        booking: updatedBooking,
+      });
+  
+    } catch (error) {
+      console.error("Feedback error:", error);
+      res.status(500).json({
         success: false,
-        message: "Booking not found or not eligible for feedback",
+        message: "Server error",
+        error: error.message,
       });
     }
- booking.feedback = feedback;
- booking.rating = rating;
- const updateBooking = await booking.save();
-  }
+  };
 
-  const provider = await User.findById(booking.serviceProvider);
-  provider.reviews.push({user:req.user.id,
-    feedback,
-    rating,
-  });
-  provider.averageRating = provider.reviews.reduce(
-    (acc,review) => acc + review.rating,0
-  )/await provider.save();
+  export const checkSlotAvailability = async (req, res) => {
+    try {
+      const { providerId, date, startTime, endTime } = req.query;
+  
+      // Step 1: Validate input
+      if (!providerId || !date || !startTime || !endTime) {
+        return res.status(400).json({
+          success: false,
+          message: "Missing required parameters",
+        });
+      }
+  
+      // Step 2: Validate time format (HH:MM)
+      const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+      if (!timeRegex.test(startTime) || !timeRegex.test(endTime)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid time format (use HH:MM)",
+        });
+      }
+  
+      // Step 3: Parse times to UTC
+      const parsedStart = new Date(`${date}T${startTime}:00Z`);
+      const parsedEnd = new Date(`${date}T${endTime}:00Z`);
+  
+      if (isNaN(parsedStart) || isNaN(parsedEnd)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid time format (use HH:MM)",
+        });
+      }
+  
+      // Step 4: Check provider's working hours (from User model)
+      const provider = await User.findById(providerId).select("workingHours");
+      const workingStart = new Date(`${date}T${provider.workingHours.start}:00Z`);
+      const workingEnd = new Date(`${date}T${provider.workingHours.end}:00Z`);
+  
+      if (parsedStart < workingStart || parsedEnd > workingEnd) {
+        return res.status(200).json({
+          success: true,
+          isAvailable: false,
+          message: "Outside working hours",
+        });
+      }
+  
+      // Step 5: Check overlapping bookings
+      const overlapping = await Booking.findOne({
+        serviceProvider: providerId,
+        $or: [
+          { startTime: { $lt: parsedEnd }, endTime: { $gt: parsedStart } },
+        ],
+      });
+  
+      res.status(200).json({
+        success: true,
+        isAvailable: !overlapping,
+        message: overlapping ? "Slot booked" : "Slot available",
+      });
+  
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: "Server error",
+        error: error.message,
+      });
+    }
+  };
+
+
+  export const getAllBookingAdmin = async(req,res)=>{
+try {
+  const bookings = await Booking.find().populate("user")
+  .populate("serviceProvider");
   res.status(200).json({
     success: true,
-    message: "Feedback submitted successfully",
-    booking: updatedBooking,
-  });
-  res.status(200).json({
-    success: true,
-    message: "Feedback submitted successfully",
-    booking: updatedBooking,
+    message: "Bookings fetched successfully",
+    bookings,
   });
 } catch (error) {
-  
+  console.error("Error fetching bookings:", error);
+  res.status(500).json({
+    success: false,
+    message: "Server error",
+    error: error.message,
+  });
 }
   }
 
+  export const getBookingDetailsAdmin =(req,res)=>{
+try {
+  const bookingDetails = Booking.findById(req.params.id);
+  res.status(200).json({ success: true,  bookingDetails});
+
+} catch (error) {
+  res.status(500).json({ success: false, message: "Server error", error: error.message });
+
+}
+  }
