@@ -4,67 +4,79 @@ import crypto from "crypto";
 import generateToken from "../../Utils/generateToken.js";
 import cloudinary from "../cloudinary.js";
 import sendEmail from "../../Utils/sendEmail.js";
+import Service from "../../models/serviceModel.js";
 //  Register User
 export const registerUser = async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password, role, skills, services, pricing, location, bio, experience } = req.body;
 
+    // Check if user exists
     if (await User.findOne({ email })) {
       return res.status(400).json({ message: "User already exists" });
     }
 
-    // ✅ Password Validation
-    const passwordRegex =
-      /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[!@#$%^&*])[A-Za-z\d!@#$%^&*]{8,}$/;
-
+    // Password validation
+    const passwordRegex = /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[!@#$%^&*])[A-Za-z\d!@#$%^&*]{8,}$/;
     if (!passwordRegex.test(password)) {
       return res.status(400).json({
-        message:
-          "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character",
+        message: "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character",
       });
     }
 
-    // ✅ Hash Password Before Saving
-    const hashedPassword = await bcrypt.hash(password, 12);
-
-    // ✅ Upload Profile Picture to Cloudinary (if provided)
+    // Handle profile picture from middleware
     let profilePicture = { public_id: "", url: "" };
-
     if (req.file) {
-      const uploadedImage = await cloudinary.uploader.upload(req.file.path, {
-        folder: "WorkBuddy_ProfilePics",
-      });
-
       profilePicture = {
-        public_id: uploadedImage.public_id,
-        url: uploadedImage.secure_url,
+        public_id: req.file.public_id,
+        url: req.file.secure_url
       };
     }
 
-    // ✅ Create User
-    const user = await User.create({
+    // Create user data object
+    const userData = {
       name,
       email,
-      password: hashedPassword,
+      password: await bcrypt.hash(password, 12),
       role,
-      profilePicture, // ✅ Store uploaded profile picture
-    });
+      profilePicture,
+      ...(role === "service-provider" && {
+        skills: skills || [],
+        services: services || [],
+        pricing: pricing || 0,
+        location: location || "",
+        bio: bio || "",
+        experience: experience || 0,
+        isProfileComplete: true
+      })
+    };
 
-    // ✅ Generate Email Verification Token
+    // Create user
+    const user = await User.create(userData);
+
+    // Generate and send verification token
     const verificationToken = user.generateVerificationToken();
     await user.save();
 
-    // ✅ Send Verification Email
-    const emailMessage = `Hello ${user.name},\n\nPlease verify your email by entering this code in Postman or frontend:\n\nVerification Code: ${verificationToken}\n\nThis code is valid for 40 minutes.\n\nIf you did not register, please ignore this email.`;
-    await sendEmail(user.email, "Verify Your Email - WorkBuddy", emailMessage);
+    const emailMessage = `Hello ${user.name},\n\nVerify your email using this token:\n${verificationToken}\n\nValid for 40 minutes.`;
+    await sendEmail(user.email, "Verify Your Email", emailMessage);
 
     res.status(201).json({
-      message:
-        "User registered successfully. A verification email has been sent to your email address.",
+      message: "User registered successfully. Verification email sent.",
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        profilePicture: user.profilePicture.url
+      }
     });
   } catch (error) {
     console.error("Registration Error:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    res.status(500).json({ 
+      message: "Server error",
+      error: error.message,
+      ...(error instanceof multer.MulterError && { uploadError: true })
+    });
   }
 };
 
@@ -97,42 +109,10 @@ export const verifyEmail = async (req,res)=>{
   }
 }
 
-// export const loginUser = async (req, res) => {
-//   try {
-//     const { email, password } = req.body;
-//     const user = await User.findOne({ email });
-
-//     if (!user || !(await user.comparePassword(password))) {
-//       return res.status(401).json({ message: "Invalid email or password" });
-//     }
-
-//     if (!user.emailVerified) {
-//       return res.status(403).json({ message: "Please verify your email before logging in." });
-//     }
-
-//     const token = generateToken(user._id);
-//     res.status(200).json({
-//       message: "Login successful",
-//       user: {
-//         _id: user._id,
-//         name: user.name,
-//         email: user.email,
-//         role: user.role,
-//         profilePicture: user.profilePicture,
-//       },
-//       token,
-//     });
-
-//   } catch (error) {
-//     console.error("Login Error:", error);
-//     res.status(500).json({ message: "Server error", error: error.message });
-//   }
-// };
-
 export const loginUser = async (req, res) => {
   try {
     const { email, password } = req.body;
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email }).select("+password");
 
     if (!user || !(await user.comparePassword(password))) {
       return res.status(401).json({ message: "Invalid email or password" });
@@ -331,59 +311,119 @@ export const verifyOtp = async (req, res) => {
   }
 };
 
-export const buildProfile = async(req,res)=>{
-  try {
-    const {skills,experience,services,pricing,location,bio,gender}=req.body;
 
-    let user = await User.findById(req.user.id);
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-        // Update fields
-        user.skills = skills || user.skills;
-        user.experience = experience || user.experience;
-        user.services = services || user.services;
-        user.pricing = pricing || user.pricing;
-        user.location = location || user.location;
-        user.bio = bio || user.bio;
-        user.gender = gender || user.gender;
+export const buildProfile = async (req, res) => {
+  try {
+    const { 
+      skills, 
+      experience, 
+      services, // Array of new services to add
+      pricing, 
+      location, 
+      bio, 
+      gender 
+    } = req.body;
+
+    // 1. Find the user
+    const user = await User.findById(req.user.id);
     
-        
-        user.isProfileComplete = Boolean(services&&pricing&&location);
+    if (!user) {
+      return res.status(404).json({ 
+        success: false,
+        message: "User not found" 
+      });
+    }
 
-        await user.save();
-        res.status(200).json({message:"profile upadted seccessfully",user});
+   
+    // 3. Validate incoming services
+    if (services && services.length > 0) {
+      const invalidServices = services.some(service => 
+        !service.name?.trim() ||
+        !service.description?.trim() ||
+        typeof service.price !== "number" ||
+        service.price < 0 ||
+        !service.category?.trim() ||
+        service.duration < 0.5
+      );
+
+      if (invalidServices) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid service format. Ensure all services have valid name, description, price (>0), category, and duration (>=0.5)"
+        });
+      }
+
+      // 4. Create services in Service collection
+      const createdServices = await Service.insertMany(
+        services.map(service => ({
+          ...service,
+          provider: user._id, // Link to provider
+        }))
+      );
+
+      // 5. Store service IDs in user.services
+      user.services = createdServices.map(s => s._id);
+    }
+
+    // 6. Update other profile fields
+    if (skills) user.skills = skills;
+    if (experience) user.experience = experience;
+    if (pricing) user.pricing = pricing;
+    if (location) user.location = location.trim();
+    if (bio) user.bio = bio.trim();
+    if (gender) user.gender = gender;
+
+    // 7. Check profile completion status
+    user.isProfileComplete = (
+      user.services?.length > 0 &&  // Now checks service IDs array
+      typeof user.pricing === "number" &&
+      user.pricing > 0 &&
+      user.location.trim() !== ""
+    );
+
+    // 8. Save updated user
+    const updatedUser = await user.save();
+
+    // 9. Return filtered response
+    const profileData = {
+      skills: updatedUser.skills,
+      experience: updatedUser.experience,
+      services: updatedUser.services, // Now returns service IDs
+      pricing: updatedUser.pricing,
+      location: updatedUser.location,
+      bio: updatedUser.bio,
+      gender: updatedUser.gender,
+      isProfileComplete: updatedUser.isProfileComplete,
+      averageRating: updatedUser.averageRating
+    };
+
+    res.status(200).json({
+      success: true,
+      message: "Profile updated successfully",
+      profile: profileData
+    });
+
   } catch (error) {
-    res.status(500).json({message:"Server error",error: error.message});
-
+    console.error("Profile update error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message
+    });
   }
-}
-export const getAllserviceProvider = async (req, res) => {
-  try {
-    const providers = await User.find({ role: "service-provider" });
+};
 
-    if (!providers || providers.length === 0) {
+export const getAllServiceProviders = async (req, res) => {
+  try {
+    const providers = await User.find({ role: "service-provider" })
+      .select("_id name profilePicture bio experience gender isProfileComplete location pricing services skills")
+      .lean();
+
+    if (!providers.length) {
       return res.status(404).json({ message: "No service providers found" });
     }
 
-    // Map over providers and remove sensitive info
-    const providerDetails = providers.map(provider => {
-      return {
-        _id: provider._id,
-        name: provider.name,
-        profilePicture: provider.profilePicture,
-        bio: provider.bio,
-        experience: provider.experience,
-        gender: provider.gender,
-        isProfileComplete: provider.isProfileComplete,
-        location: provider.location,
-        pricing: provider.pricing,
-        services: provider.services,
-        skills: provider.skills
-      };
-    });
-
-    res.status(200).json({ providers: providerDetails });
+    res.status(200).json({ providers });
   } catch (error) {
     console.error("Error fetching service providers:", error);
     res.status(500).json({ message: "Server error", error: error.message });

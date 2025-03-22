@@ -6,7 +6,7 @@ import dotenv from "dotenv";
 import cookieParser from "cookie-parser";
 import connectMongo from "./config/mongo.js";  // MongoDB connection
 import authRoute from "./routes/authRoute.js";
-
+import bookingRoute from "./routes/bookingRoute.js"
 dotenv.config({ path: "./.env" });
 
 const app = express();
@@ -26,9 +26,9 @@ app.use(cookieParser());
 app.use(compression());
 app.use(express.json());
 
-// ✅ Routes
+//Routes
 app.use("/api/auth", authRoute);
-
+app.use("/api/book",bookingRoute);
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Server is running on port ${PORT}`);
