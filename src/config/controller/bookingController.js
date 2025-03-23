@@ -387,13 +387,232 @@ try {
 }
   }
 
-  export const getBookingDetailsAdmin =(req,res)=>{
-try {
-  const bookingDetails = Booking.findById(req.params.id);
-  res.status(200).json({ success: true,  bookingDetails});
+  export const getBookingDetailsAdmin = async (req, res) => {
+    try {
+      const bookingDetails = await Booking.findById(req.params.id)
+        .lean()
+        .populate({
+          path: "service",
+          select: "name price duration category", // Only expose necessary service fields
+        })
+        .populate({
+          path: "serviceProvider",
+          select: "name email profilePicture", // Exclude sensitive provider fields
+        });
+  
+      if (!bookingDetails) {
+        return res.status(404).json({ 
+          success: false, 
+          message: "Booking not found with the given ID" 
+        });
+      }
+  
+      res.status(200).json({ 
+        success: true,
+        data: {
+          booking: {
+            id: bookingDetails._id,
+            date: bookingDetails.bookingDate,
+            startTime: bookingDetails.startTime,
+            endTime: bookingDetails.endTime,
+            status: bookingDetails.status,
+            totalPrice: bookingDetails.totalPrice
+          },
+          service: bookingDetails.service,
+          provider: bookingDetails.serviceProvider
+        }
+      });
+  
+    } catch (error) {
+      // Handle invalid ID format
+      if (error.name === "CastError") {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid booking ID format"
+        });
+      }
+  
+      // Handle other errors
+      console.error("[ADMIN] Booking details error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error while fetching booking details",
+        error: process.env.NODE_ENV === "development" ? error.message : undefined
+      });
+    }
+  };
 
-} catch (error) {
-  res.status(500).json({ success: false, message: "Server error", error: error.message });
+  export const deleteBookingAdmin = async (req, res) => {
+    try {
+      const deleteBooking = await Booking.findByIdAndDelete(req.params.id);
+  
+      if (!deleteBooking) {
+        return res.status(404).json({
+          success: false,
+          message: "Booking not found"
+        });
+      }
+  
+      res.status(200).json({
+        success: true,
+        message: "Booking deleted successfully",
+        deletedBooking: deleteBooking.toObject() // Convert Mongoose document to plain object
+      });
+  
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: "Server error",
+        error: error.message // Include error message for debugging
+      });
+    }
+  };
+  export const getAllBookingprovider = async (req, res) => {
+    try {
+      const serviceProviderId = req.user._id;
+  
+      // Filter bookings by service provider ID
+      const bookings = await Booking.find({ serviceProvider: serviceProviderId })
+        .select('user service status location') // Select only needed fields
+        .populate('user', 'name email')         // Only get user's name and email
+        .populate('service', 'title')           // Only get service title
+        .sort({ createdAt: -1 });               // Sort by newest first
+  
+      if (bookings.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "No bookings found for this service provider"
+        });
+      }
+  
+      res.status(200).json({
+        success: true,
+        count: bookings.length,
+        bookings
+      });
+  
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: "Server error",
+        error: error.message
+      });
+    }
+  };
 
-}
+  export const getAllBookingproviderById = async (req, res) => {
+    try {
+      const serviceProviderId = req.user._id;
+      const bookingId = req.params.id;
+  
+      const booking = await Booking.findOne({
+        _id: bookingId,
+        serviceProvider: serviceProviderId
+      })
+      .populate({
+        path: 'user',
+        select: 'name email phone'
+      })
+      .populate({
+        path: 'service',
+        select: 'name description price category',
+        populate: {
+          path: 'provider',
+          select: 'name email businessName'
+        }
+      })
+      .lean();
+  
+      if (!booking) {
+        return res.status(404).json({
+          success: false,
+          message: "Booking not found or unauthorized access"
+        });
+      }
+  
+      // Remove internal version key and convert dates
+      const { __v, ...bookingData } = booking;
+      
+      // Format dates to ISO string
+      const formattedBooking = {
+        ...bookingData,
+        bookingDate: booking.bookingDate.toISOString(),
+        startTime: booking.startTime.toISOString(),
+        endTime: booking.endTime.toISOString(),
+        createdAt: booking.createdAt.toISOString(),
+        updatedAt: booking.updatedAt.toISOString()
+      };
+  
+      res.status(200).json({
+        success: true,
+        booking: formattedBooking
+      });
+  
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: "Server error",
+        error: error.message
+      });
+    }
+  };
+
+  // In your booking controller file
+export const updateBookingStatus = async (req, res) => {
+  try {
+    const serviceProviderId = req.user._id;
+    const bookingId = req.params.id;
+    const { status } = req.body;
+
+    // Validate allowed status values
+    const allowedStatus = ['pending', 'confirmed', 'completed', 'cancelled'];
+    if (!allowedStatus.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid status value",
+        allowedStatus
+      });
+    }
+
+    // Find and update booking with authorization check
+    const updatedBooking = await Booking.findOneAndUpdate(
+      {
+        _id: bookingId,
+        serviceProvider: serviceProviderId
+      },
+      { status },
+      { new: true, runValidators: true }
+    )
+    .populate('user', 'name email')
+    .populate('service', 'name price')
+    .lean();
+
+    if (!updatedBooking) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found or unauthorized"
+      });
+    }
+
+    // Format response
+    const response = {
+      ...updatedBooking,
+      bookingDate: updatedBooking.bookingDate.toISOString(),
+      startTime: updatedBooking.startTime.toISOString(),
+      endTime: updatedBooking.endTime.toISOString()
+    };
+
+    res.status(200).json({
+      success: true,
+      message: "Booking status updated successfully",
+      booking: response
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message
+    });
   }
+};
