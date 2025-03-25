@@ -38,3 +38,17 @@ export const authorizedRoles = (...roles) => {
     next();
   };
 };
+
+export const socketAuth = (socketAuth,Auth)=>{
+  try {
+    const token = socket.handshake.query.token;
+    if (!token) throw new Error("Authentication required");
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    socket.user = decoded;
+    next();
+  } catch (error) {
+    next(new Error("Authentication failed"));
+
+  }
+}
