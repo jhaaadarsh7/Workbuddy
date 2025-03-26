@@ -1,7 +1,7 @@
 import Booking from "../../models/BookingModel.js";
 import Service from "../../models/serviceModel.js";
 import User from "../../models/userModel.js";
-
+import { pusher } from "../../app.js";
 export const createBooking = async (req, res) => {
   try {
     const { serviceProvider, service, bookingDate, startTime, endTime, location } = req.body;
@@ -46,6 +46,12 @@ export const createBooking = async (req, res) => {
     const savedBooking = await newBooking.save();
     const bookingData = savedBooking.toObject();
     delete bookingData.__v; // Remove unnecessary fields
+
+    pusher.trigger(`booking-${serviceProvider}`,"new-booking",{
+      userId: req.user.id,
+      bookingData,
+    })
+
 
     res.status(201).json({ success: true, booking: bookingData });
 
